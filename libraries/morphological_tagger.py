@@ -17,7 +17,7 @@ def get_lemmas(text):
   # ~ 3 elementas yra bendrinė žodžio forma (su pagrindinėmis formomis) (pvz: negalėti(-i,-ėjo) )
   # ~ 4 elementas yra žodžio ypatybės (pvz.: vksm., neig., nesngr., tiesiog. n., būt. k. l., dgs., 3 asm.)
   data = {
-          "tekstas" : " " + text.encode('utf-8'),
+          "tekstas" : " " + text,
           "tipas" : "anotuoti",
           "pateikti" : "LM",
           "veiksmas" : "Rezultatas puslapyje"
