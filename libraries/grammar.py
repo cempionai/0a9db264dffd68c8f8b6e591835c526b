@@ -142,7 +142,7 @@ class Grammar(BaseMethods.BaseMethods):
       return (False, [])
     return (True, candidateVec)
     
-  def getMostSimilar(self, mainWord, candidates = [], getSimilarityStatistics = False, averaging = False, averageCount = 7):
+  def getMostSimilar(self, mainWord, candidates = [], getSimilarityStatistics = False, averaging = False, averageCount = 7, averageBaseText = True):
     """ Returns the list of words from 'candidates', sorted in the order of similarity to a particular word ('mainWord').
         If candidates is an empty list, whole current words2vec dictionary is used.
         If getSimilarityStatistics is true, a tuple is returned.
@@ -161,7 +161,8 @@ class Grammar(BaseMethods.BaseMethods):
       # If we want to average and there was something in the past, we average
       if averaging and self.vectorPast != []:
         # Average in current word (?)
-        self.includeWordInAverage(mainWord)
+        if averageBaseText:
+          self.includeWordInAverage(mainWord)
         # We average last 'averageCount' vectors and now current vector will be vectorAverage
         vectorAverage = np.mean( np.array(self.vectorPast[-averageCount:]), axis=0 )#np.mean( np.array(self.vectorPast[-averageCount:]), axis=0 )
         wordVec = vectorAverage
