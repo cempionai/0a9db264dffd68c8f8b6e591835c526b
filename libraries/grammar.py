@@ -23,6 +23,11 @@ class Grammar(BaseMethods.BaseMethods):
 
   # Global word2vec model
   model = []
+  grammarDic = defaultdict(lambda: [])
+  vectorDic = defaultdict(lambda: [])
+  
+  # Parameters for averaging of past vectors
+  vectorPast = []
 
   def __init__(self, word2vecBinFile = ''):
     """ If 'word2vecBinFile' is non-empty, loads word2vec binary data """
@@ -35,34 +40,47 @@ class Grammar(BaseMethods.BaseMethods):
     seen_add = seen.add
     return [ x for x in seq if not (x in seen or seen_add(x))]
 
-  def getSameGrammar(self, word, database, table, column, wordColumn):
+  def loadGrammarDatabase(self, database, table, column, wordColumn):
+    con = lite.connect(database)
+    with con:    
+      cur = con.cursor()
+      # Get all words with same POS
+      cur.execute("SELECT " + wordColumn + ", " + column + " FROM " + table )
+      rows = cur.fetchall()
+      
+      # Fill grammar dictionary with words from database
+      for entry in rows:
+        self.grammarDic[entry[1]].append(entry[0])
+      
+      # Make them unique
+      for key in self.grammarDic:
+        self.grammarDic[key] = self.unique(self.grammarDic[key])
+
+  def getSameGrammar(self, word, database = '', table = '', column = '', wordColumn = ''):
     """ Returns POS of the given word, searching among entries in a given database.
         The format of database is assumed to be such that the 'column' contains all POS of words, for example
         "vksm., teig., nesngr., tiesiog. n., būt. k. l., vns., 3 asm."
         (database morph.db keeps it in column ypat)
         Note that the actual part of speech is included in this column, so there is no need to specify it separately.
     """
-    
-    # Ensure database exists
-    # ~ if os.path.isfile(database):
-      # ~ print "ERROR: Database " + database + " does not exist."
-      # ~ return
-    
+  
     # Get POS tags of a supplied word
     pos_tags = tag.get_lemmas(word.encode("utf-8"))[0]
-    # ~ print pos_tags
     
-    # Connect to a database
-    con = lite.connect(database)
-    with con:    
-      cur = con.cursor()
-      # Get all words with same POS
-      cur.execute("SELECT " + wordColumn + " FROM " + table + " WHERE " + column + "=?", (pos_tags.morphDetails,) )
-      rows = cur.fetchall()
-      # Convert them to unicode
-      possible_words = [unicode(row[0]) for row in rows]  # since query returns only one column, it must be the first
+    if database == '':
+      possible_words = self.grammarDic[pos_tags.morphDetails]
+    else:
+      # Connect to a database
+      con = lite.connect(database)
+      with con:    
+        cur = con.cursor()
+        # Get all words with same POS
+        cur.execute("SELECT " + wordColumn + " FROM " + table + " WHERE " + column + "=?", (pos_tags.morphDetails,) )
+        rows = cur.fetchall()
+        # Convert them to unicode
+        possible_words = self.unique( [unicode(row[0]) for row in rows] )  # since query returns only one column, it must be the first
       
-    return self.unique(possible_words)
+    return possible_words
   
   def loadVectorData(self, vectorBinPath):
     """ Loads a binary vector model from a given file"""
@@ -111,15 +129,20 @@ class Grammar(BaseMethods.BaseMethods):
     Expected cause of failure is word absence from the current vocabulary.
     
     (!) This function breaks the encapsulation of Grammar class."""
-        
-    try:
-      vector = self.model[word]
-      return (True, vector)
-    except:
-      pass
-    return (False, [])
     
-  def getMostSimilar(self, mainWord, candidates = [], getSimilarityStatistics = False):
+    candidateVec = self.vectorDic[word]
+    # Memorisation: if this word has been encountered before, do not recalculate its vector, take it from dictionary instead
+    if candidateVec == []:
+      try:
+        vector = self.model[word]
+        self.vectorDic[word] = candidateVec
+        return (True, vector)
+      except:
+        pass
+      return (False, [])
+    return (True, candidateVec)
+    
+  def getMostSimilar(self, mainWord, candidates = [], getSimilarityStatistics = False, averaging = False, averageCount = 7):
     """ Returns the list of words from 'candidates', sorted in the order of similarity to a particular word ('mainWord').
         If candidates is an empty list, whole current words2vec dictionary is used.
         If getSimilarityStatistics is true, a tuple is returned.
@@ -135,10 +158,19 @@ class Grammar(BaseMethods.BaseMethods):
       # Get vector of a main word
       wordVec = self.wordToVector(mainWord)[1]
       
+      # If we want to average and there was something in the past, we average
+      if averaging and self.vectorPast != []:
+        # Average in current word (?)
+        self.includeWordInAverage(mainWord)
+        # We average last 'averageCount' vectors and now current vector will be vectorAverage
+        vectorAverage = np.mean( np.array(self.vectorPast[-averageCount:]), axis=0 )#np.mean( np.array(self.vectorPast[-averageCount:]), axis=0 )
+        wordVec = vectorAverage
+      
       cosDist = []
       for cand in candidates:
         # Get vector for each candidate
         candidateVec = self.wordToVector(cand.encode("utf-8"))[1]
+        
         # If both words (mainWord and candidate) are in dictionary, compute their cosine similarity
         if candidateVec != [] and wordVec != []:
           # Note that spatial.distance.cosine return 1 - cos(u,w) for vectors u, w, thus it is accordingly corrected
@@ -152,7 +184,13 @@ class Grammar(BaseMethods.BaseMethods):
       return cosDist
     else:
       return [word for (dist, word) in cosDist]
-  
+
+  def includeWordInAverage(self, word):
+    """Include most likely vector in total average"""
+    # Calculate word vector and append it to past words list
+    vector = self.wordToVector(word)[1]
+    if vector != []:
+      self.vectorPast.append(vector)
 
 if __name__ == '__main__':
   # Example one: get all grammatically similar words to "karas" and find the most similar of them
